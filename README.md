@@ -64,3 +64,78 @@
 <br>
 
 ## Getting Started
+### 1. Quick Start
+To use this starter template, you can either clone this repository or use this template as the base of your project.
+```bash
+# Clone this repository
+$ git clone https://github.com/AidenLeeeee/nestjs-prisma-postgres.git
+
+# Navigate to the project directory
+$ cd nestjs-prisma-postgres
+
+# Install dependencies
+$ pnpm install
+
+# Start the development server
+$ pnpm run start:dev
+```
+
+<br>
+
+### 2. PostgreSQL with Docker
+To utilize Docker to launch PostgreSQL in your local environment, please refer to the following instructions.
+
+#### 1) Please fill out the `.env` file as shown below.
+```bash
+# Environment file template
+
+# 🚨 Do not upload this file to GitHub.
+# 🚨 Make sure you have added this file to the .gitignore file.
+
+# App
+NODE_ENV=
+
+# DB
+POSTGRES_DB=myDb                                      # Whatever you want.
+POSTGRES_USER=myUser                                  # Whatever you want.
+POSTGRES_PASSWORD=myPassword                          # Whatever you want.
+POSTGRES_HOME_DIR=/my/local/path/data/                # Your Local path to be linked with the docker volume.
+POSTGRES_PORT=5432                                    # Whatever you want.
+POSTGRES_URL=`postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_PORT}/${POSTGRES_DB}?schema=public`
+```
+<br>
+
+#### 2) Navigate to `.gitignore` and uncomment the .env glob at the bottom of the file.
+```bash
+# Env files
+# 🚨 Be sure to uncomment the comments below. (# .env -> .env)
+.env
+```
+<br>
+
+#### 3) Run the command below to execute the `docker-compose.db.yml` file and quickly launch PostgreSQL locally.
+```bash
+$ docker compose -f docker-compose.db.yml up -d
+# or
+$ npm run docker:db
+```
+
+<br>
+
+## Caution
+#### ⚠️ Security
+Be careful not to upload your created env file to GitHub.<br>
+Don't forget to uncomment the .env glob in the `.gitignore` file to prevent the env file from being uploaded to GitHub.
+```bash
+# Env files
+# 🚨 Be sure to uncomment the comments below. (# .env -> .env)
+.env
+```
+<br>
+
+#### ⚠️ Commit Lint Convention
+This template comes with automatic commit linting, and please refer to the related links below for more information.<br>
+[@commitlint/config-conventional](https://github.com/conventional-changelog/commitlint)
+
+
+**[⬆ back to top](#instruction)**

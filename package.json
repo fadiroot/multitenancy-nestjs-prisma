@@ -19,7 +19,8 @@
         "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
         "test:e2e": "jest --config ./test/jest-e2e.json",
         "docker:db": "docker-compose -f docker-compose.db.yml up -d",
-        "prepare": "husky install"
+        "prepare": "husky install",
+        "prisma:generate": "npx prisma generate"
     },
     "lint-staged": {
         "{src,test}/**/*.{js,ts}": [

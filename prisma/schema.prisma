@@ -1,26 +1,26 @@
 generator client {
   provider = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
-
 }
 
 datasource db {
   provider = "postgresql"
-  url      = "postgresql://myUser:myPassword@db:5432/myDb?schema=public"
+  url      =  "postgresql://myUser:myPassword@db:5432/myDb?schema=public"
 }
 
 model Tenant {
-  id         Int      @id @default(autoincrement())
-  name       String
-  domain     String   @unique
-  dbName     String
-  dbUser     String
-  dbPassword String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id          Int      @id @default(autoincrement())
+  name        String
+  domain      String   @unique
+  dbName      String
+  dbUser      String
+  dbPassword  String
+  dbPort      Int
+  isUsed      Boolean
+  containerId String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
-// Define other models for the tenant databases here
 model User {
   id        Int      @id @default(autoincrement())
   email     String   @unique

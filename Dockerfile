@@ -1,6 +1,9 @@
 # Use the official Node.js image as the base image
 FROM node:20-alpine
 
+# Install Docker CLI
+RUN apk add --no-cache docker-cli
+
 # Set the working directory inside the container
 WORKDIR /usr/src/app
 
@@ -19,5 +22,11 @@ RUN npm run build
 # Expose the port on which the NestJS app will run
 EXPOSE 3000
 
-# Command to run the NestJS application
-CMD ["npm", "run", "start:dev"]
+# Create a startup script
+RUN echo '#!/bin/sh' > /usr/local/bin/startup.sh && \
+    echo 'docker network create tenant-network || true' >> /usr/local/bin/startup.sh && \
+    echo 'npm run start:dev' >> /usr/local/bin/startup.sh && \
+    chmod +x /usr/local/bin/startup.sh
+
+# Command to run the startup script
+CMD ["/usr/local/bin/startup.sh"]

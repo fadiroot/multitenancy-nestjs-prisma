@@ -1,0 +1,20 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/master-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      =  "postgresql://myUser:myPassword@db:5432/myDb?schema=public"
+}
+
+model Tenant {
+  id          Int      @id @default(autoincrement())
+  name        String
+  domain      String   @unique
+  databaseUrl String   // Stores the full database URL for the tenant
+  containerId String
+  isUsed      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

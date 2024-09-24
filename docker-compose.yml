@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   db:
     image: postgres:latest
@@ -13,7 +15,7 @@ services:
       - ${POSTGRES_HOME_DIR}:/var/lib/postgresql/data
     networks:
       - app-network
-      - tenant-network  # Add this line
+      - tenant-network
 
   adminer:
     image: adminer:4.8.1
@@ -21,7 +23,7 @@ services:
       - '8080:8080'
     networks:
       - app-network
-      - tenant-network  # Add this line
+      - tenant-network
 
   app:
     build:
@@ -40,7 +42,7 @@ services:
       - db
     networks:
       - app-network
-      - tenant-network  # Add this line
+      - tenant-network
     volumes:
       - ./src:/usr/src/app/src
       - ./node_modules:/usr/src/app/node_modules
@@ -52,4 +54,4 @@ networks:
   app-network:
     driver: bridge
   tenant-network:
-    external: true  # Add this block
+    external: true

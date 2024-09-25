@@ -7,6 +7,12 @@
     "license": "UNLICENSED",
     "scripts": {
       "build": "nest build",
+      "prisma:generate": "npx prisma generate",
+      "tenant:migrate:diff": "prisma migrate diff --from-empty --to-schema-datamodel prisma/tenant-schema.prisma --script"
+,
+      "tenant:migrate:dev": "prisma migrate dev --schema=./prisma/tenant-schema.prisma --create-only",
+      "tenant:migrate:deploy": "prisma migrate deploy --schema=./prisma/tenant-schema.prisma",
+      "tenant:migrate:status": "prisma migrate status --schema=./prisma/tenant-schema.prisma",
       "generate-master-prisma": "prisma generate --schema=./prisma/schema.prisma",
       "generate-tenant-prisma": "prisma generate --schema=./prisma/tenant-schema.prisma",
       "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -21,8 +27,7 @@
       "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
       "test:e2e": "jest --config ./test/jest-e2e.json",
       "docker:db": "docker-compose -f docker-compose.db.yml up -d",
-      "prepare": "husky install",
-      "prisma:generate": "npx prisma generate"
+      "prepare": "husky install"
     },
     "lint-staged": {
       "{src,test}/**/*.{js,ts}": [

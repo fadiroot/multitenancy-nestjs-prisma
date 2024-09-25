@@ -81,7 +81,6 @@ export class TenantService {
             dbUser,
             dbPassword,
             host,
-           
         };
     }
 
@@ -114,7 +113,9 @@ export class TenantService {
                 }
 
                 // Use pg_isready as a secondary check
-                await execAsync(`pg_isready -h host.docker.internal -p ${port}`);
+                await execAsync(
+                    `pg_isready -h host.docker.internal -p ${port}`,
+                );
                 console.log(`Postgres on port ${port} is ready (pg_isready)`);
                 console.log('the container of postgres db created');
                 break;
@@ -160,16 +161,27 @@ export class TenantService {
         const containerInfo = await this.createPostgresContainer(
             name.toLowerCase().replace(/\s/g, '_'),
         );
-        console.log(`${new Date().toISOString()} Container created successfully:`, containerInfo);
+        console.log(
+            `${new Date().toISOString()} Container created successfully:`,
+            containerInfo,
+        );
 
         // Set up the tenant's database schema
-        await this.setupTenantSchema(containerInfo.dbName, containerInfo.dbUser, containerInfo.dbPassword, containerInfo.port);
-        
+        await this.setupTenantSchema(
+            containerInfo.dbName,
+            containerInfo.dbUser,
+            containerInfo.dbPassword,
+            containerInfo.port,
+        );
+
         // Ensure the tenant's database is ready before returning
-        await this.waitForPostgresToBeReady(containerInfo.port, containerInfo.containerId);
-        
+        await this.waitForPostgresToBeReady(
+            containerInfo.port,
+            containerInfo.containerId,
+        );
+
         // Create initial data (roles, permissions, etc.)
-        
+
         // Create a tenant record in the primary database
         const tenant = await this.prisma.tenant.create({
             data: {
@@ -183,7 +195,7 @@ export class TenantService {
                 dbPort: containerInfo.port,
                 containerId: containerInfo.containerId,
                 databaseUrl: `postgresql://${containerInfo.dbUser}:${containerInfo.dbPassword}@host.docker.internal:${containerInfo.port}/${containerInfo.dbName}`,
-    } , // Type assertion to bypass the type error
+            }, // Type assertion to bypass the type error
         });
 
         // Return the created tenant
@@ -206,7 +218,10 @@ export class TenantService {
     private async updateEnvFile(tenantDbUrl: string): Promise<void> {
         const envFilePath = path.resolve(__dirname, '../../.env');
         const envFileContent = await fs.readFile(envFilePath, 'utf-8');
-        const updatedEnvFileContent = envFileContent.replace(/DATABASE_URL=.*/, `DATABASE_URL=${tenantDbUrl}`);
+        const updatedEnvFileContent = envFileContent.replace(
+            /DATABASE_URL=.*/,
+            `DATABASE_URL=${tenantDbUrl}`,
+        );
         await fs.writeFile(envFilePath, updatedEnvFileContent);
     }
 
@@ -222,36 +237,35 @@ export class TenantService {
         });
     }
 
-    private async setupTenantSchema(dbName: string, dbUser: string, dbPassword: string, port: number): Promise<void> {
+    private async setupTenantSchema(
+        dbName: string,
+        dbUser: string,
+        dbPassword: string,
+        port: number,
+    ): Promise<void> {
         const connectionString = `postgresql://${dbUser}:${dbPassword}@host.docker.internal:${port}/${dbName}`;
-        
-        const migrationDir = path.join(process.cwd(), 'prisma', 'migrations', 'tenant');
-        const sqlMigrationFile = path.join(migrationDir, 'init.sql');
-        
+
+        // Update the DATABASE_URL in the environment
+        process.env.DATABASE_URL = connectionString;
+
         try {
-            // Check if the SQL migration file exists
-            if (!await fs.access(sqlMigrationFile).then(() => true).catch(() => false)) {
-                console.error(`SQL migration file not found: ${sqlMigrationFile}`);
-                throw new Error('SQL migration file not found');
-            }
+            const schemaPath = path.resolve(
+                __dirname,
+                '../../prisma/tenant-schema.prisma',
+            );
 
-            // Read the content of the SQL migration file
-            const sqlMigrationContent = await fs.readFile(sqlMigrationFile, 'utf-8');
-
-            // Execute the SQL directly using psql
-            const psqlCommand = `docker run --rm --network host postgres:latest psql "${connectionString}" -c "${sqlMigrationContent.replace(/"/g, '\\"')}"`;
-            console.log('Executing SQL command:', psqlCommand);
-            const migrationOutput = await execAsync(psqlCommand);
-            console.log('Migration output:', migrationOutput.stdout, migrationOutput.stderr);
-
-            // Verify if tables were created
-            const verifyTablesCommand = `docker run --rm --network host postgres:latest psql "${connectionString}" -c "\\dt"`;
-            const verifyOutput = await execAsync(verifyTablesCommand);
-            console.log('Verify tables output:', verifyOutput.stdout, verifyOutput.stderr);
+            // Use prisma db push instead of migrate deploy
+            const pushCommand = `npx prisma db push --schema="${schemaPath}"`;
+            const { stdout, stderr } = await execAsync(pushCommand);
+            console.log('Database push output:', stdout);
+            if (stderr) console.error('Database push error:', stderr);
 
             console.log('Tenant schema setup completed successfully');
         } catch (error) {
-            console.error(`${new Date().toISOString()} Error setting up tenant schema:`, error);
+            console.error(
+                `${new Date().toISOString()} Error setting up tenant schema:`,
+                error,
+            );
             throw error;
         }
     }
@@ -259,5 +273,205 @@ export class TenantService {
     private generateSecurePassword(): string {
         // Implement secure password generation
         return 'securePassword123!'; // Placeholder - replace with actual secure generation
+    }
+
+    async generateTenantMigration(name: string): Promise<string> {
+        try {
+            const timestamp = new Date()
+                .toISOString()
+                .replace(/[-:]/g, '')
+                .split('.')[0];
+            const migrationName = `${timestamp}_${name}`;
+            const migrationDir = path.join(
+                process.cwd(),
+                'prisma',
+                'migrations',
+                'tenant',
+            );
+            const sqlFilePath = path.join(migrationDir, `${migrationName}.sql`);
+
+            // Ensure the migration directory exists
+            await fs.mkdir(migrationDir, { recursive: true });
+
+            // Generate the migration SQL
+            const { stdout, stderr } = await execAsync(
+                'npm run tenant:migrate:diff',
+            );
+
+            if (stderr) {
+                console.error('Migration generation error:', stderr);
+                throw new Error('Failed to generate migration SQL');
+            }
+
+            // Write the SQL to a file
+            await fs.writeFile(sqlFilePath, stdout);
+
+            console.log(`Migration SQL generated successfully: ${sqlFilePath}`);
+            return sqlFilePath;
+        } catch (error) {
+            console.error('Error generating tenant migration:', error);
+            throw error;
+        }
+    }
+
+    async applyMigrationToAllTenants(): Promise<void> {
+        const tenants = await this.prisma.tenant.findMany();
+        for (const tenant of tenants) {
+            await this.applyTenantMigration(tenant);
+        }
+    }
+
+    async applyTenantMigration(tenant: Tenant): Promise<void> {
+        const migrationDir = path.join(
+            process.cwd(),
+            'prisma',
+            'migrations',
+            'tenant',
+        );
+
+        try {
+            // Create SchemaVersion table if it doesn't exist
+            const createSchemaVersionTableSQL = `
+                CREATE TABLE IF NOT EXISTS "SchemaVersion" (
+                    "id" SERIAL PRIMARY KEY,
+                    "version" VARCHAR(255) NOT NULL UNIQUE,
+                    "appliedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+            `;
+            await this.executeSQLOnTenant(tenant, createSchemaVersionTableSQL);
+
+            // Get all migration files
+            const migrationFiles = await fs.readdir(migrationDir);
+            const sqlFiles = migrationFiles
+                .filter((file) => file.endsWith('.sql'))
+                .sort();
+
+            for (const sqlFile of sqlFiles) {
+                const version = sqlFile.split('_')[0];
+
+                // Check if migration has been applied
+                const checkVersionSQL = `SELECT * FROM "SchemaVersion" WHERE version = '${version}'`;
+                const versionResult = await this.executeSQLOnTenant(
+                    tenant,
+                    checkVersionSQL,
+                );
+
+                if (versionResult.rowCount === 0) {
+                    // Apply the migration
+                    const migrationPath = path.join(migrationDir, sqlFile);
+                    const migrationContent = await fs.readFile(
+                        migrationPath,
+                        'utf-8',
+                    );
+                    await this.executeSQLOnTenant(tenant, migrationContent);
+
+                    // Record the applied migration
+                    const recordVersionSQL = `INSERT INTO "SchemaVersion" (version) VALUES ('${version}')`;
+                    await this.executeSQLOnTenant(tenant, recordVersionSQL);
+
+                    console.log(
+                        `Applied migration ${sqlFile} to tenant ${tenant.name}`,
+                    );
+                } else {
+                    console.log(
+                        `Migration ${sqlFile} already applied to tenant ${tenant.name}`,
+                    );
+                }
+            }
+
+            console.log(
+                `All migrations applied successfully to tenant ${tenant.name}`,
+            );
+        } catch (error) {
+            console.error(
+                `Error applying migrations to tenant ${tenant.name}:`,
+                error,
+            );
+            throw error;
+        }
+    }
+
+    private async executeSQLOnTenant(
+        tenant: Tenant,
+        sql: string,
+    ): Promise<any> {
+        const connectionString = `postgresql://${tenant.dbUser}:${tenant.dbPassword}@host.docker.internal:${tenant.dbPort}/${tenant.dbName}`;
+        const psqlCommand = `docker run --rm --network host postgres:latest psql "${connectionString}" -c "${sql.replace(
+            /"/g,
+            '\\"',
+        )}"`;
+        const { stdout, stderr } = await execAsync(psqlCommand);
+        if (stderr) console.error('SQL execution error:', stderr);
+        return { stdout, stderr };
+    }
+
+    async applyMasterMigration(): Promise<void> {
+        try {
+            console.log('Applying master migration');
+            const masterCommand =
+                'npx prisma migrate deploy --schema=./prisma/schema.prisma';
+            const masterOutput = await execAsync(masterCommand);
+            console.log(
+                'Master migration output:',
+                masterOutput.stdout,
+                masterOutput.stderr,
+            );
+        } catch (error) {
+            console.error('Error applying master migration:', error);
+            throw error;
+        }
+    }
+
+    async generateMigrationForAllTenants(name: string): Promise<void> {
+        const tenants = await this.prisma.tenant.findMany();
+
+        for (const tenant of tenants) {
+            console.log(`Generating migration for tenant: ${tenant.name}`);
+            await this.generateTenantMigration(name);
+        }
+    }
+
+    async getTenantById(id: string): Promise<Tenant | null> {
+        return this.prisma.tenant.findUnique({
+            where: { id: parseInt(id) },
+        });
+    }
+
+    async generateMigrations(): Promise<void> {
+        try {
+            // Fetch all tenants from the master database
+            const tenants = await this.prisma.tenant.findMany();
+
+            for (const tenant of tenants) {
+                console.log(`Generating migration for tenant: ${tenant.name}`);
+
+                // Update .env file with tenant's database URL
+                await this.updateEnvFile(tenant.databaseUrl);
+
+                // Construct the migration command
+                const command = `npx prisma migrate dev --schema=./prisma/tenant-schema.prisma --name init --create-only`;
+
+                try {
+                    // Execute the migration command
+                    const { stdout, stderr } = await execAsync(command);
+                    console.log(`Migration output for ${tenant.name}:`, stdout);
+                    if (stderr) {
+                        console.error(
+                            `Migration error for ${tenant.name}:`,
+                            stderr,
+                        );
+                    }
+                } catch (error) {
+                    console.error(
+                        `Failed to generate migration for ${tenant.name}:`,
+                        error,
+                    );
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching tenants:', error);
+        } finally {
+            await this.prisma.$disconnect();
+        }
     }
 }

@@ -10,6 +10,7 @@ export class AppController {
     getHello(): string {
         return this.appService.getHello();
     }
+
     @Get('tenant')
     getTenantInfo(@Req() req: Request): any {
         const tenant = (req as any).tenant;
@@ -17,5 +18,11 @@ export class AppController {
             message: 'Tenant Info Retrieved Successfully',
             tenant,
         };
+    }
+
+    @Get('tenant/users')
+    async getTenantUsers(@Req() req: Request): Promise<any[]> {
+        const tenant = (req as any).tenant;
+        return this.appService.getUsersForTenant(tenant);
     }
 }

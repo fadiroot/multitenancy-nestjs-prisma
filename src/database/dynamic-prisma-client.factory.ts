@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { databaseConfig } from '../config/database.config';
 import { execSync } from 'child_process';
 import * as path from 'path';
 
 @Injectable()
-export class DynamicPrismaClientFactory {
+export class DynamicPrismaClientFactory implements OnModuleDestroy {
     private clients: Map<string, PrismaClient> = new Map();
     private masterClient: PrismaClient | undefined;
 
@@ -19,7 +19,7 @@ export class DynamicPrismaClientFactory {
         const client = new PrismaClient({
             datasources: {
                 db: {
-                    url: `postgresql://${tenant.dbUser}:${tenant.dbPassword}@${databaseConfig.tenant.host}:${databaseConfig.tenant.port}/${tenant.dbName}?schema=public`,
+                    url: `postgresql://${tenant.dbUser}:${tenant.dbPassword}@host.docker.internal:${tenant.dbPort}/${tenant.dbName}?schema=public`,
                 },
             },
         });
@@ -48,12 +48,10 @@ export class DynamicPrismaClientFactory {
     }): Promise<void> {
         const masterClient = this.getMasterClient();
 
-        // Create the database
         await masterClient.$executeRawUnsafe(
             `CREATE DATABASE "${tenantInfo.dbName}"`,
         );
 
-        // Create the user and grant privileges
         await masterClient.$executeRawUnsafe(
             `CREATE USER "${tenantInfo.dbUser}" WITH PASSWORD '${tenantInfo.dbPassword}'`,
         );
@@ -61,7 +59,6 @@ export class DynamicPrismaClientFactory {
             `GRANT ALL PRIVILEGES ON DATABASE "${tenantInfo.dbName}" TO "${tenantInfo.dbUser}"`,
         );
 
-        // Apply migrations to the new database
         await this.applyMigrationsToTenant(tenantInfo);
     }
 
@@ -72,10 +69,8 @@ export class DynamicPrismaClientFactory {
     }): Promise<void> {
         const tenantDatabaseUrl = `postgresql://${tenantInfo.dbUser}:${tenantInfo.dbPassword}@${databaseConfig.tenant.host}:${databaseConfig.tenant.port}/${tenantInfo.dbName}?schema=public`;
 
-        // Set the DATABASE_URL environment variable for Prisma CLI
         process.env.DATABASE_URL = tenantDatabaseUrl;
 
-        // Run Prisma migrations
         const prismaPath = path.join(
             __dirname,
             '..',
@@ -86,10 +81,29 @@ export class DynamicPrismaClientFactory {
         );
         execSync(`${prismaPath} migrate deploy`, { stdio: 'inherit' });
 
-        // Optionally, run seeds if you have any
-        // execSync(`${prismaPath} db seed`, { stdio: 'inherit' });
-
-        // Reset the DATABASE_URL
         process.env.DATABASE_URL = databaseConfig.master.url;
+    }
+
+    async getUsersForTenant(tenant: any): Promise<any[]> {
+        const client = await this.getClientForTenant(tenant);
+        const users = await client.$queryRaw`SELECT * FROM "User"`;
+        return users as any[];
+    }
+
+    async onModuleDestroy() {
+        for (const client of this.clients.values()) {
+            await client.$disconnect();
+        }
+        if (this.masterClient) {
+            await this.masterClient.$disconnect();
+        }
+    }
+
+    async disconnectClient(tenantDbName: string) {
+        const client = this.clients.get(tenantDbName);
+        if (client) {
+            await client.$disconnect();
+            this.clients.delete(tenantDbName);
+        }
     }
 }

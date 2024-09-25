@@ -12,6 +12,13 @@ export class PrismaService
         password: string;
     } | null = null;
 
+    constructor() {
+        super();
+        if (!PrismaClient) {
+            throw new Error('@prisma/client did not initialize yet. Please run "prisma generate" and try to import it again.');
+        }
+    }
+
     async onModuleInit() {
         await this.$connect();
     }
@@ -20,19 +27,21 @@ export class PrismaService
         await this.$disconnect();
     }
 
-    setTenantConfig(database: string, user: string, password: string) {
-        this.$disconnect(); // Disconnect current connection
-        this.$connect(); // Reconnect with new configuration
+    async setTenantConfig(database: string, user: string, password: string) {
+        // Disconnect current connection
+        await this.$disconnect();
 
-        this.$use(async (params, next) => {
+        // Reinitialize PrismaClient with new configuration
+        this.tenantConfig = { database, user, password };
+        await this.$connect(); // Reconnect with new configuration
+
+        this.$use(async (params: any, next: any) => {
             // Apply tenant-specific configuration
             if (this.tenantConfig) {
-                this
+                await this
                     .$executeRaw`SET search_path TO ${this.tenantConfig.database}`;
             }
             return next(params);
         });
-
-        this.tenantConfig = { database, user, password };
     }
 }

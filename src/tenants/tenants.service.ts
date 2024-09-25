@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-user.dto';
-import { PrismaClient, Tenant } from '@prisma/client';
+import { Tenant } from 'src/generated/master-client';
 import Docker = require('dockerode');
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 const execAsync = promisify(exec);
 
@@ -79,6 +81,7 @@ export class TenantService {
             dbUser,
             dbPassword,
             host,
+           
         };
     }
 
@@ -111,14 +114,14 @@ export class TenantService {
                 }
 
                 // Use pg_isready as a secondary check
-                await execAsync(`pg_isready -h localhost -p ${port}`);
+                await execAsync(`pg_isready -h host.docker.internal -p ${port}`);
                 console.log(`Postgres on port ${port} is ready (pg_isready)`);
                 console.log('the container of postgres db created');
                 break;
             } catch (err) {
                 retries -= 1;
                 console.log(
-                    `Waiting for Postgres on port ${port} to be ready... (${retries} retries left)`,
+                    `${new Date().toISOString()} Waiting for Postgres on port ${port} to be ready... (${retries} retries left)`,
                 );
                 await delay(5000); // Increase delay to 5 seconds
             }
@@ -157,8 +160,16 @@ export class TenantService {
         const containerInfo = await this.createPostgresContainer(
             name.toLowerCase().replace(/\s/g, '_'),
         );
-        console.log('Container created successfully:', containerInfo);
+        console.log(`${new Date().toISOString()} Container created successfully:`, containerInfo);
 
+        // Set up the tenant's database schema
+        await this.setupTenantSchema(containerInfo.dbName, containerInfo.dbUser, containerInfo.dbPassword, containerInfo.port);
+        
+        // Ensure the tenant's database is ready before returning
+        await this.waitForPostgresToBeReady(containerInfo.port, containerInfo.containerId);
+        
+        // Create initial data (roles, permissions, etc.)
+        
         // Create a tenant record in the primary database
         const tenant = await this.prisma.tenant.create({
             data: {
@@ -168,59 +179,80 @@ export class TenantService {
                 dbUser: containerInfo.dbUser,
                 dbPassword: containerInfo.dbPassword,
                 isUsed: true,
+                createdBy: 'admin',
                 dbPort: containerInfo.port,
                 containerId: containerInfo.containerId,
-            },
+                databaseUrl: `postgresql://${containerInfo.dbUser}:${containerInfo.dbPassword}@host.docker.internal:${containerInfo.port}/${containerInfo.dbName}`,
+    } , // Type assertion to bypass the type error
         });
-
-        // Set up the tenant's database schema using Prisma migrations
-        await this.runPrismaMigrations(
-            containerInfo.dbName,
-            containerInfo.dbUser,
-            containerInfo.dbPassword,
-            containerInfo.port,
-        );
-        // Ensure the tenant's database is ready before returning
-        await this.waitForPostgresToBeReady(tenant.dbPort, tenant.containerId);
 
         // Return the created tenant
         return tenant;
     }
 
-    private async runPrismaMigrations(
-        dbName: string,
-        dbUser: string,
-        dbPassword: string,
-        port: number,
-    ): Promise<void> {
-        const connectionString = `postgresql://${dbUser}:${dbPassword}@localhost:${port}/${dbName}`;
-        console.log(`Connection string: ${connectionString}`);
+    async createTenantDatabase(tenantId: string): Promise<void> {
+        const tenantDbUrl = `postgresql://user:password@localhost:5432/${tenantId}`;
 
-        // Set up a new Prisma client for the tenant's database
-        const prisma = new PrismaClient({
-            datasources: {
-                db: {
-                    url: `postgresql://${dbUser}:${dbPassword}@host.docker.internal:${port}/${dbName}`,
-                },
-            },
+        // Create the tenant database
+        await this.prisma.$executeRawUnsafe(`CREATE DATABASE ${tenantId}`);
+
+        // Update the .env file or environment variables
+        this.updateEnvFile(tenantDbUrl);
+
+        // Generate Prisma client for the tenant
+        await this.generatePrismaClient();
+    }
+
+    private async updateEnvFile(tenantDbUrl: string): Promise<void> {
+        const envFilePath = path.resolve(__dirname, '../../.env');
+        const envFileContent = await fs.readFile(envFilePath, 'utf-8');
+        const updatedEnvFileContent = envFileContent.replace(/DATABASE_URL=.*/, `DATABASE_URL=${tenantDbUrl}`);
+        await fs.writeFile(envFilePath, updatedEnvFileContent);
+    }
+
+    private generatePrismaClient(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            exec('npm run generate-tenant-prisma', (error) => {
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve();
+                }
+            });
         });
+    }
 
+    private async setupTenantSchema(dbName: string, dbUser: string, dbPassword: string, port: number): Promise<void> {
+        const connectionString = `postgresql://${dbUser}:${dbPassword}@host.docker.internal:${port}/${dbName}`;
+        
+        const migrationDir = path.join(process.cwd(), 'prisma', 'migrations', 'tenant');
+        const sqlMigrationFile = path.join(migrationDir, 'init.sql');
+        
         try {
-            // Run migrations
-            await prisma.$executeRawUnsafe('SELECT 1'); // Test the connection
-            console.log('Database connection successful');
+            // Check if the SQL migration file exists
+            if (!await fs.access(sqlMigrationFile).then(() => true).catch(() => false)) {
+                console.error(`SQL migration file not found: ${sqlMigrationFile}`);
+                throw new Error('SQL migration file not found');
+            }
 
-            // Run the actual migrations
-            await execAsync(
-                `DATABASE_URL="${connectionString}" npx prisma migrate deploy`,
-            );
-            console.log('Migrations applied successfully');
+            // Read the content of the SQL migration file
+            const sqlMigrationContent = await fs.readFile(sqlMigrationFile, 'utf-8');
+
+            // Execute the SQL directly using psql
+            const psqlCommand = `docker run --rm --network host postgres:latest psql "${connectionString}" -c "${sqlMigrationContent.replace(/"/g, '\\"')}"`;
+            console.log('Executing SQL command:', psqlCommand);
+            const migrationOutput = await execAsync(psqlCommand);
+            console.log('Migration output:', migrationOutput.stdout, migrationOutput.stderr);
+
+            // Verify if tables were created
+            const verifyTablesCommand = `docker run --rm --network host postgres:latest psql "${connectionString}" -c "\\dt"`;
+            const verifyOutput = await execAsync(verifyTablesCommand);
+            console.log('Verify tables output:', verifyOutput.stdout, verifyOutput.stderr);
+
+            console.log('Tenant schema setup completed successfully');
         } catch (error) {
-            console.error('Error running migrations:', error);
+            console.error(`${new Date().toISOString()} Error setting up tenant schema:`, error);
             throw error;
-        } finally {
-            // Close the Prisma connection
-            await prisma.$disconnect();
         }
     }
 

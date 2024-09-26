@@ -13,7 +13,6 @@ const execAsync = promisify(exec);
 @Injectable()
 export class TenantService {
     private readonly docker: Docker;
-    private usedPorts: Set<number> = new Set();
     private readonly MIN_PORT = 5433; // Start from 5433 to avoid conflict with the main Postgres instance
     private readonly MAX_PORT = 5533; // Arbitrary upper limit, adjust as needed
 
@@ -27,10 +26,15 @@ export class TenantService {
         });
     }
 
-    private getAvailablePort(): number {
+    private async getAvailablePort(): Promise<number> {
+        // Get all used ports from the database
+        const usedPorts = await this.prisma.tenant.findMany({
+            select: { dbPort: true },
+        }).then(tenants => tenants.map(t => t.dbPort));
+
+        // Find the first available port
         for (let port = this.MIN_PORT; port <= this.MAX_PORT; port++) {
-            if (!this.usedPorts.has(port)) {
-                this.usedPorts.add(port);
+            if (!usedPorts.includes(port)) {
                 return port;
             }
         }
@@ -46,7 +50,7 @@ export class TenantService {
         host: string;
     }> {
         const containerName = `postgres-${tenantName}`;
-        const port = this.getAvailablePort();
+        const port = await this.getAvailablePort();
         const dbName = `db_${tenantName}`;
         const dbUser = `user_${tenantName}`;
         const dbPassword = this.generateSecurePassword();

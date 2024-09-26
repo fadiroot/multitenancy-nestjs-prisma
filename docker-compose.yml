@@ -10,12 +10,17 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - '${POSTGRES_PORT}:${POSTGRES_PORT}'
+      - '${POSTGRES_PORT}:5432'
     volumes:
-      - ${POSTGRES_HOME_DIR}:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     networks:
       - app-network
       - tenant-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   adminer:
     image: adminer:4.8.1
@@ -36,10 +41,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     ports:
       - '3000:3000'
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     networks:
       - app-network
       - tenant-network
@@ -49,10 +57,13 @@ services:
       - ./node_modules:/usr/src/app/node_modules
       - ./prisma:/usr/src/app/prisma
       - /var/run/docker.sock:/var/run/docker.sock
-    command: sh -c "npm run prisma:generate && npm run start:dev"
+    command: sh -c "npm run deploy:master-schema && npm run prisma:generate && npm run start:dev"
 
 networks:
   app-network:
     driver: bridge
   tenant-network:
     external: true
+
+volumes:
+  postgres_data:

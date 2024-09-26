@@ -34,6 +34,8 @@ model Role {
 model Permission {
   id          Int      @id @default(autoincrement())
   name        String   @unique
+  resource    String
+  action      String
   description String?
   roles       Role[]   @relation("RolePermissions")
   createdAt   DateTime @default(now())
